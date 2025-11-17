@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>TikTok 美妆数据分析仪表盘</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f5f5f7;
+      color: #111827;
+    }
+    header {
+      background: #111827;
+      color: #f9fafb;
+      padding: 16px 32px;
+    }
+    header h1 {
+      margin: 0 0 4px 0;
+      font-size: 22px;
+    }
+    header p {
+      margin: 0;
+      font-size: 13px;
+      opacity: 0.8;
+    }
+    main {
+      max-width: 1200px;
+      margin: 24px auto 40px;
+      padding: 0 16px;
+    }
+    section {
+      background: #ffffff;
+      border-radius: 10px;
+      box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
+      padding: 18px 20px 24px;
+      margin-bottom: 20px;
+    }
+    section h2 {
+      margin-top: 0;
+      font-size: 18px;
+      margin-bottom: 8px;
+    }
+    section p {
+      font-size: 13px;
+      color: #4b5563;
+      margin-top: 0;
+      margin-bottom: 12px;
+    }
+    #status {
+      font-size: 13px;
+      color: #6b7280;
+      margin-bottom: 8px;
+    }
+    #error {
+      font-size: 13px;
+      color: #b91c1c;
+      margin-top: 4px;
+    }
+    .chart {
+      width: 100%;
+      height: 420px;
+    }
+    table.top-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    table.top-table th,
+    table.top-table td {
+      border-bottom: 1px solid #e5e7eb;
+      padding: 6px 8px;
+      text-align: left;
+    }
+    table.top-table th {
+      background: #f3f4f6;
+      font-weight: 600;
+    }
+    table.top-table tbody tr:hover {
+      background: #f9fafb;
+    }
+    .inline-controls {
+      font-size: 13px;
+      margin-bottom: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .inline-controls label {
+      color: #374151;
+    }
+    .inline-controls select {
+      font-size: 13px;
+      padding: 4px 6px;
+    }
+    .note-text {
+      font-size: 12px;
+      color: #6b7280;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>TikTok 美妆数据分析仪表盘</h1>
+    <p>基于 xl.csv &amp; readme 中的分析思路，聚焦分类结构、价格带、品牌、成分 / 功效和热销商品。</p>
+  </header>
+  <main>
+    <div id="status">正在从 xl.csv 加载数据…</div>
+    <div id="error"></div>
+
+    <section>
+      <h2>1. 分类销售结构（按 GMV）</h2>
+      <p>展示 GMV 最高的前 15 个二级类目，帮助你快速看到哪些细分赛道最热。</p>
+      <div id="chart-category" class="chart"></div>
+    </section>
+
+    <section>
+      <h2>2. 价格带分析：GMV vs SKU 数量</h2>
+      <p>绿色柱子为各价格带总 GMV，橙色折线为 SKU 数量（右轴），避免遮挡 GMV。</p>
+      <div id="chart-price-band" class="chart"></div>
+    </section>
+
+    <section>
+      <h2>3. 上架时间维度（按上架月份聚合 GMV）</h2>
+      <p>根据商品初次上架月份汇总 GMV，粗略观察时间趋势（注意并非严格的月度销售数据）。</p>
+      <div id="chart-month" class="chart"></div>
+    </section>
+
+    <section>
+      <h2>4. Top 商品列表（按 GMV 排序）</h2>
+      <p>列出 GMV 前 50 的商品，包含店铺、价格和分类信息，方便做选品和对标。</p>
+      <table class="top-table" id="top-table">
+        <thead>
+          <tr>
+            <th>商品名称</th>
+            <th>店铺名称</th>
+            <th>二级类目</th>
+            <th>价格</th>
+            <th>GMV</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>5. 店铺 / 品牌 GMV Top 20</h2>
+      <p>按店铺（近似品牌）聚合 GMV，查看谁是 GMV 体量最大的玩家。</p>
+      <div id="chart-brand-gmv" class="chart"></div>
+    </section>
+
+    <section>
+      <h2>6. 类目 × 价格带 热力图（GMV）</h2>
+      <p>横轴为价格带，纵轴为二级类目，颜色深浅表示 GMV，用来发现某些价格带下的细分机会。</p>
+      <div id="chart-cat-price" class="chart"></div>
+    </section>
+
+    <section>
+      <h2>7. 价格 vs GMV 散点图</h2>
+      <p>每个点代表一个商品，横轴为价格，纵轴为 GMV，可以观察“高价爆款”和“平价爆款”的分布（示例中取 GMV 前 400 个商品）。</p>
+      <div id="chart-price-gmv" class="chart"></div>
+    </section>
+
+    <section>
+      <h2>8. 成分关键词：GMV Top 10</h2>
+      <p>基于商品名称中的成分词（如烟酰胺、玻尿酸、VC 等）聚合 GMV，看哪些成分最“带货”。</p>
+      <div id="chart-ingredient-bar" class="chart"></div>
+    </section>
+
+    <section>
+      <h2>9. 功效关键词趋势（按上架月份 GMV）</h2>
+      <p>从保湿 / 美白 / 抗老 / 控痘 / 修护中选出 GMV 最高的 3 个功效，观察它们在时间维度上的 GMV 变化。</p>
+      <div id="chart-benefit-trend" class="chart"></div>
+    </section>
+
+    <section>
+      <h2>10. 类目价格区间竞争力分析</h2>
+      <p>选择具体二级品类（如香水、面膜等），分析该品类在不同价格区间的 GMV 分布，并给出主流价格区间内的 Top 10 商品。</p>
+      <div class="inline-controls">
+        <label for="category-price-select">选择二级类目：</label>
+        <select id="category-price-select"></select>
+        <span class="note-text">（根据该类目内 GMV 排序的前若干类目）</span>
+      </div>
+      <div id="category-price-summary" class="note-text"></div>
+      <div id="chart-category-price-band" class="chart"></div>
+      <table class="top-table" id="table-category-price-top10">
+        <thead>
+          <tr>
+            <th>商品名称</th>
+            <th>店铺名称</th>
+            <th>价格</th>
+            <th>GMV</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script>
+    // 成分 / 功效 / 形态关键词配置（可按需调整）
+    const INGREDIENT_KEYWORDS = [
+      { key: "niacinamide", label: "Niacinamide / 烟酰胺", patterns: ["niacinamide", "烟酰胺"] },
+      { key: "hyaluronic", label: "Hyaluronic / 玻尿酸", patterns: ["hyaluronic", "hya ", " hyal", "玻尿酸"] },
+      { key: "vitamin_c", label: "Vitamin C / VC", patterns: ["vitamin c", "vit c", " vc ", " vc", "维c", "维生素c"] },
+      { key: "retinol", label: "Retinol / 视黄醇", patterns: ["retinol", "视黄醇"] },
+      { key: "aha_bha", label: "AHA / BHA", patterns: [" aha", "bha", "a.h.a", "b.h.a"] },
+      { key: "peptide", label: "Peptide / 肽", patterns: ["peptide", " 肽", "多肽"] },
+      { key: "ceramide", label: "Ceramide / 神经酰胺", patterns: ["ceramide", "神经酰胺"] },
+    ];
+
+    const BENEFIT_KEYWORDS = [
+      { key: "hydrating", label: "保湿 / 补水", patterns: ["hydrating", "moistur", "保湿", "补水"] },
+      { key: "brightening", label: "提亮 / 美白", patterns: ["brighten", "glow", "whitening", "美白", "提亮"] },
+      { key: "acne", label: "控痘 / 祛痘", patterns: ["acne", "anti-acne", "祛痘", "控痘"] },
+      { key: "antiaging", label: "抗老 / 紧致", patterns: ["anti-aging", "anti ageing", "抗老", "紧致", "淡纹"] },
+      { key: "barrier", label: "修护屏障", patterns: ["barrier", "repair", "修护", "屏障"] },
+    ];
+
+    const FORMAT_KEYWORDS = [
+      { key: "serum", label: "精华 / Serum", patterns: ["serum", "精华"] },
+      { key: "toner", label: "水 / Toner", patterns: ["toner", "爽肤水", "化妆水"] },
+      { key: "mask", label: "面膜 / Mask", patterns: ["mask", "面膜"] },
+      { key: "lip_oil", label: "唇油 / Lip Oil", patterns: ["lip oil", "lip gloss", "ลิป", "กลอส"] },
+      { key: "stick", label: "棒状 / Stick", patterns: [" stick", "棒"] },
+    ];
+
+    // 更细粒度的价格区间，用于“类目价格区间竞争力分析”
+    const DETAIL_PRICE_BINS = [
+      { min: 0, max: 20, label: "≤20" },
+      { min: 20, max: 40, label: "20-40" },
+      { min: 40, max: 80, label: "40-80" },
+      { min: 80, max: 150, label: "80-150" },
+      { min: 150, max: 300, label: "150-300" },
+      { min: 300, max: Infinity, label: "≥300" },
+    ];
+
+    function parseNumber(value) {
+      if (value == null) return NaN;
+      const s = String(value)
+        .replace(/,/g, "")
+        .replace(/%/g, "")
+        .trim();
+      const match = s.match(/[-+]?\d*\.?\d+/);
+      return match ? Number(match[0]) : NaN;
+    }
+
+    function parseDate(value) {
+      if (!value) return null;
+      const d = new Date(value);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    function monthKey(date) {
+      if (!date) return null;
+      const y = date.getFullYear();
+      const m = date.getMonth() + 1;
+      return `${y}-${m.toString().padStart(2, "0")}`;
+    }
+
+    function extractTagsFromName(name, keywordList) {
+      const tags = [];
+      if (!name) return tags;
+      const lower = String(name).toLowerCase();
+      keywordList.forEach((cfg) => {
+        const hit = cfg.patterns.some((p) =>
+          lower.includes(String(p).toLowerCase())
+        );
+        if (hit) tags.push(cfg.key);
+      });
+      return tags;
+    }
+
+    function normalizeRows(rows) {
+      if (!rows.length) return [];
+      const columns = Object.keys(rows[0]);
+
+      const findCol = (keyword) =>
+        columns.find((c) => c && c.includes && c.includes(keyword)) || null;
+
+      const colProductName = findCol("商品名称");
+      const colShopName = findCol("店铺");
+      const colPrice = findCol("商品售价");
+      const colCategory = findCol("商品分类");
+      const colCommission = findCol("佣金比例");
+      const colRecentSales =
+        columns.find((c) => c.includes("销量") && !c.includes("总")) || null;
+      const colTotalSales = findCol("总销量");
+      const colTotalGMV = findCol("总销售额");
+      const colGMV =
+        columns.find((c) => c.includes("销售额") && !c.includes("总销售额")) ||
+        null;
+      const colListedAt = findCol("商品上架时间");
+      const colShopTotal = findCol("店铺总销");
+
+      return rows.map((r) => {
+        const productName = colProductName ? r[colProductName] : "";
+        const category = colCategory ? r[colCategory] : null;
+        let cat1 = null;
+        let cat2 = null;
+        let cat3 = null;
+        if (category) {
+          const parts = String(category).split("-");
+          cat1 = parts[0] || null;
+          cat2 = parts[1] || null;
+          cat3 = parts[2] || null;
+        }
+
+        const listedAt = colListedAt ? parseDate(r[colListedAt]) : null;
+        const price = colPrice ? parseNumber(r[colPrice]) : NaN;
+        let priceBand = null;
+        if (!isNaN(price)) {
+          if (price <= 20) priceBand = "mass(<=20)";
+          else if (price <= 80) priceBand = "masstige(20-80)";
+          else if (price <= 200) priceBand = "premium(80-200)";
+          else priceBand = "luxury(>200)";
+        }
+
+        const ingredientTags = extractTagsFromName(
+          productName,
+          INGREDIENT_KEYWORDS
+        );
+        const benefitTags = extractTagsFromName(productName, BENEFIT_KEYWORDS);
+        const formatTags = extractTagsFromName(productName, FORMAT_KEYWORDS);
+
+        return {
+          raw: r,
+          product_name: productName || "",
+          shop_name: colShopName ? r[colShopName] : "",
+          category,
+          cat_level1: cat1,
+          cat_level2: cat2,
+          cat_level3: cat3,
+          price,
+          commission_rate: colCommission ? parseNumber(r[colCommission]) : NaN,
+          recent_sales: colRecentSales ? parseNumber(r[colRecentSales]) : NaN,
+          total_sales: colTotalSales ? parseNumber(r[colTotalSales]) : NaN,
+          total_gmv: colTotalGMV ? parseNumber(r[colTotalGMV]) : NaN,
+          gmv: colGMV ? parseNumber(r[colGMV]) : NaN,
+          listed_at: listedAt,
+          listed_month: monthKey(listedAt),
+          shop_total_sales: colShopTotal ? parseNumber(r[colShopTotal]) : NaN,
+          price_band: priceBand,
+          ingredient_tags: ingredientTags,
+          benefit_tags: benefitTags,
+          format_tags: formatTags,
+        };
+      });
+    }
+
+    function renderCategoryChart(rows) {
+      const map = {};
+      rows.forEach((r) => {
+        if (!r.cat_level2) return;
+        if (isNaN(r.gmv)) return;
+        map[r.cat_level2] = (map[r.cat_level2] || 0) + r.gmv;
+      });
+      const arr = Object.entries(map).map(([cat, gmv]) => ({ cat, gmv }));
+      arr.sort((a, b) => b.gmv - a.gmv);
+      const top = arr.slice(0, 15);
+      if (!top.length) return;
+
+      const data = [
+        {
+          x: top.map((d) => d.cat),
+          y: top.map((d) => d.gmv),
+          type: "bar",
+          marker: { color: "#6366f1" },
+        },
+      ];
+      const layout = {
+        margin: { t: 30, r: 10, b: 80, l: 60 },
+        xaxis: { title: "二级类目", automargin: true },
+        yaxis: { title: "GMV" },
+      };
+      Plotly.newPlot("chart-category", data, layout, { responsive: true });
+    }
+
+    function renderPriceBandChart(rows) {
+      const bands = [
+        "mass(<=20)",
+        "masstige(20-80)",
+        "premium(80-200)",
+        "luxury(>200)",
+      ];
+      const map = {};
+      rows.forEach((r) => {
+        if (!r.price_band || isNaN(r.gmv)) return;
+        if (!map[r.price_band]) map[r.price_band] = { gmv: 0, count: 0 };
+        map[r.price_band].gmv += r.gmv;
+        map[r.price_band].count += 1;
+      });
+      const arr = bands.map((b) => ({
+        band: b,
+        gmv: map[b] ? map[b].gmv : 0,
+        count: map[b] ? map[b].count : 0,
+      }));
+
+      const traceGMV = {
+        x: arr.map((d) => d.band),
+        y: arr.map((d) => d.gmv),
+        type: "bar",
+        name: "GMV",
+        marker: { color: "#10b981" },
+      };
+      const traceCount = {
+        x: arr.map((d) => d.band),
+        y: arr.map((d) => d.count),
+        type: "scatter",
+        mode: "lines+markers",
+        name: "SKU 数量",
+        yaxis: "y2",
+        line: { color: "#f59e0b", width: 2 },
+        marker: { size: 7 },
+      };
+      const layout = {
+        margin: { t: 30, r: 50, b: 60, l: 60 },
+        xaxis: { title: "价格带" },
+        yaxis: { title: "GMV" },
+        yaxis2: {
+          title: "SKU 数量",
+          overlaying: "y",
+          side: "right",
+        },
+        legend: { orientation: "h", x: 0, y: 1.1 },
+      };
+      Plotly.newPlot("chart-price-band", [traceGMV, traceCount], layout, {
+        responsive: true,
+      });
+    }
+
+    function renderMonthChart(rows) {
+      const map = {};
+      rows.forEach((r) => {
+        if (!r.listed_month || isNaN(r.gmv)) return;
+        map[r.listed_month] = (map[r.listed_month] || 0) + r.gmv;
+      });
+      const months = Object.keys(map).sort();
+      if (!months.length) return;
+      const gmv = months.map((m) => map[m]);
+      const data = [
+        {
+          x: months,
+          y: gmv,
+          type: "scatter",
+          mode: "lines+markers",
+          line: { color: "#3b82f6" },
+        },
+      ];
+      const layout = {
+        margin: { t: 30, r: 10, b: 60, l: 60 },
+        xaxis: { title: "上架月份" },
+        yaxis: { title: "GMV" },
+      };
+      Plotly.newPlot("chart-month", data, layout, { responsive: true });
+    }
+
+    function renderTopTable(rows) {
+      const tbody = document.querySelector("#top-table tbody");
+      tbody.innerHTML = "";
+      const filtered = rows.filter((r) => !isNaN(r.gmv));
+      filtered.sort((a, b) => b.gmv - a.gmv);
+      const top = filtered.slice(0, 50);
+      top.forEach((r) => {
+        const tr = document.createElement("tr");
+        const cells = [
+          r.product_name || "",
+          r.shop_name || "",
+          r.cat_level2 || "",
+          isNaN(r.price) ? "" : r.price.toFixed(2),
+          isNaN(r.gmv) ? "" : r.gmv.toFixed(0),
+        ];
+        cells.forEach((value) => {
+          const td = document.createElement("td");
+          td.textContent = value;
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderBrandChart(rows) {
+      const map = {};
+      rows.forEach((r) => {
+        if (!r.shop_name || isNaN(r.gmv)) return;
+        map[r.shop_name] = (map[r.shop_name] || 0) + r.gmv;
+      });
+      const arr = Object.entries(map).map(([shop, gmv]) => ({ shop, gmv }));
+      arr.sort((a, b) => b.gmv - a.gmv);
+      const top = arr.slice(0, 20);
+      if (!top.length) return;
+
+      const data = [
+        {
+          x: top.map((d) => d.shop),
+          y: top.map((d) => d.gmv),
+          type: "bar",
+          marker: { color: "#8b5cf6" },
+        },
+      ];
+      const layout = {
+        margin: { t: 30, r: 10, b: 120, l: 60 },
+        xaxis: { title: "店铺 / 品牌", automargin: true },
+        yaxis: { title: "GMV" },
+      };
+      Plotly.newPlot("chart-brand-gmv", data, layout, { responsive: true });
+    }
+
+    function renderCatPriceHeatmap(rows) {
+      const bands = [
+        "mass(<=20)",
+        "masstige(20-80)",
+        "premium(80-200)",
+        "luxury(>200)",
+      ];
+      const catGmv = {};
+      rows.forEach((r) => {
+        if (!r.cat_level2 || isNaN(r.gmv)) return;
+        catGmv[r.cat_level2] = (catGmv[r.cat_level2] || 0) + r.gmv;
+      });
+      const topCats = Object.entries(catGmv)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 12)
+        .map(([cat]) => cat);
+      if (!topCats.length) return;
+
+      const map = {};
+      rows.forEach((r) => {
+        if (!r.cat_level2 || !r.price_band || isNaN(r.gmv)) return;
+        if (!topCats.includes(r.cat_level2)) return;
+        const key = `${r.cat_level2}||${r.price_band}`;
+        map[key] = (map[key] || 0) + r.gmv;
+      });
+
+      const z = topCats.map((cat) =>
+        bands.map((band) => map[`${cat}||${band}`] || 0)
+      );
+
+      const data = [
+        {
+          x: bands,
+          y: topCats,
+          z,
+          type: "heatmap",
+          colorscale: "YlGnBu",
+          colorbar: { title: "GMV" },
+        },
+      ];
+      const layout = {
+        margin: { t: 30, r: 10, b: 60, l: 120 },
+        xaxis: { title: "价格带" },
+        yaxis: { title: "二级类目" },
+      };
+      Plotly.newPlot("chart-cat-price", data, layout, { responsive: true });
+    }
+
+    function renderPriceGmvScatter(rows) {
+      const filtered = rows.filter(
+        (r) => !isNaN(r.price) && !isNaN(r.gmv)
+      );
+      if (!filtered.length) return;
+      filtered.sort((a, b) => b.gmv - a.gmv);
+      const sample = filtered.slice(0, 400);
+
+      const data = [
+        {
+          x: sample.map((r) => r.price),
+          y: sample.map((r) => r.gmv),
+          text: sample.map(
+            (r) => `${r.product_name || ""}\n${r.shop_name || ""}`
+          ),
+          mode: "markers",
+          type: "scatter",
+          marker: {
+            size: 8,
+            color: "#ec4899",
+            opacity: 0.7,
+          },
+          hovertemplate: "价格: %{x}<br>GMV: %{y}<br>%{text}<extra></extra>",
+        },
+      ];
+      const layout = {
+        margin: { t: 30, r: 10, b: 60, l: 70 },
+        xaxis: { title: "价格" },
+        yaxis: { title: "GMV" },
+      };
+      Plotly.newPlot("chart-price-gmv", data, layout, { responsive: true });
+    }
+
+    function aggregateKeywords(rows, tagField, keywordList) {
+      const index = {};
+      keywordList.forEach((k) => {
+        index[k.key] = { key: k.key, label: k.label, gmv: 0, count: 0 };
+      });
+      rows.forEach((r) => {
+        if (!Array.isArray(r[tagField]) || isNaN(r.gmv)) return;
+        r[tagField].forEach((key) => {
+          const item = index[key];
+          if (!item) return;
+          item.gmv += r.gmv;
+          item.count += 1;
+        });
+      });
+      return Object.values(index).filter((d) => d.count > 0);
+    }
+
+    function renderIngredientBar(rows) {
+      const stats = aggregateKeywords(
+        rows,
+        "ingredient_tags",
+        INGREDIENT_KEYWORDS
+      );
+      stats.sort((a, b) => b.gmv - a.gmv);
+      const top = stats.slice(0, 10);
+      if (!top.length) return;
+
+      const data = [
+        {
+          x: top.map((d) => d.label),
+          y: top.map((d) => d.gmv),
+          type: "bar",
+          marker: { color: "#0ea5e9" },
+        },
+      ];
+      const layout = {
+        margin: { t: 30, r: 10, b: 80, l: 70 },
+        xaxis: { title: "成分关键词", automargin: true },
+        yaxis: { title: "GMV" },
+      };
+      Plotly.newPlot("chart-ingredient-bar", data, layout, {
+        responsive: true,
+      });
+    }
+
+    function renderBenefitTrend(rows) {
+      const stats = aggregateKeywords(rows, "benefit_tags", BENEFIT_KEYWORDS);
+      stats.sort((a, b) => b.gmv - a.gmv);
+      const selected = stats.slice(0, 3);
+      if (!selected.length) return;
+
+      const monthsSet = new Set();
+      const map = {};
+      selected.forEach((s) => {
+        map[s.key] = {};
+      });
+
+      rows.forEach((r) => {
+        if (!r.listed_month || isNaN(r.gmv)) return;
+        if (!Array.isArray(r.benefit_tags)) return;
+        r.benefit_tags.forEach((key) => {
+          if (!map[key]) return;
+          monthsSet.add(r.listed_month);
+          map[key][r.listed_month] = (map[key][r.listed_month] || 0) + r.gmv;
+        });
+      });
+
+      const months = Array.from(monthsSet).sort();
+      if (!months.length) return;
+
+      const traces = selected.map((s, idx) => {
+        const colorPalette = ["#3b82f6", "#10b981", "#f97316", "#ec4899"];
+        const color = colorPalette[idx % colorPalette.length];
+        return {
+          x: months,
+          y: months.map((m) => map[s.key][m] || 0),
+          type: "scatter",
+          mode: "lines+markers",
+          name: s.label,
+          line: { color },
+        };
+      });
+
+      const layout = {
+        margin: { t: 30, r: 10, b: 60, l: 60 },
+        xaxis: { title: "上架月份" },
+        yaxis: { title: "GMV" },
+        legend: { orientation: "h", x: 0, y: 1.1 },
+      };
+      Plotly.newPlot("chart-benefit-trend", traces, layout, {
+        responsive: true,
+      });
+    }
+
+    function getDetailPriceBandLabel(price) {
+      if (isNaN(price)) return null;
+      for (const bin of DETAIL_PRICE_BINS) {
+        if (price >= bin.min && price < bin.max) return bin.label;
+      }
+      return null;
+    }
+
+    function renderCategoryPriceView(rows, category) {
+      const chartId = "chart-category-price-band";
+      const summaryEl = document.getElementById("category-price-summary");
+      const tbody = document.querySelector(
+        "#table-category-price-top10 tbody"
+      );
+      if (!summaryEl || !tbody) return;
+      tbody.innerHTML = "";
+
+      const rowsCat = rows.filter(
+        (r) =>
+          r.cat_level2 === category &&
+          !isNaN(r.price) &&
+          !isNaN(r.gmv)
+      );
+      if (!rowsCat.length) {
+        summaryEl.textContent = "该类目没有价格和 GMV 数据。";
+        Plotly.purge(chartId);
+        return;
+      }
+
+      const bandStats = {};
+      let totalGmv = 0;
+      rowsCat.forEach((r) => {
+        const label = getDetailPriceBandLabel(r.price);
+        if (!label) return;
+        if (!bandStats[label]) bandStats[label] = { gmv: 0, count: 0 };
+        bandStats[label].gmv += r.gmv;
+        bandStats[label].count += 1;
+        totalGmv += r.gmv;
+      });
+
+      const bands = DETAIL_PRICE_BINS.map((b) => b.label);
+      const series = bands.map((label) => ({
+        label,
+        gmv: bandStats[label] ? bandStats[label].gmv : 0,
+        count: bandStats[label] ? bandStats[label].count : 0,
+      }));
+
+      let mainBand = series[0];
+      series.forEach((s) => {
+        if (s.gmv > mainBand.gmv) mainBand = s;
+      });
+
+      const traceGMV = {
+        x: series.map((s) => s.label),
+        y: series.map((s) => s.gmv),
+        type: "bar",
+        name: "GMV",
+        marker: { color: "#22c55e" },
+      };
+      const traceCount = {
+        x: series.map((s) => s.label),
+        y: series.map((s) => s.count),
+        type: "scatter",
+        mode: "lines+markers",
+        name: "SKU 数量",
+        yaxis: "y2",
+        line: { color: "#fb923c", width: 2 },
+        marker: { size: 7 },
+      };
+
+      const layout = {
+        margin: { t: 30, r: 60, b: 60, l: 60 },
+        xaxis: { title: "价格区间" },
+        yaxis: { title: "GMV" },
+        yaxis2: {
+          title: "SKU 数量",
+          overlaying: "y",
+          side: "right",
+        },
+        legend: { orientation: "h", x: 0, y: 1.1 },
+        title: { text: `${category} 的价格区间 GMV 分布`, font: { size: 16 } },
+      };
+
+      Plotly.newPlot(chartId, [traceGMV, traceCount], layout, {
+        responsive: true,
+      });
+
+      const share =
+        totalGmv > 0 ? ((mainBand.gmv / totalGmv) * 100).toFixed(1) : "0.0";
+      summaryEl.textContent = `主流价格区间：${mainBand.label}；该区间 GMV ≈ ${mainBand.gmv.toFixed(
+        0
+      )}，约占本类目 GMV 的 ${share}% ，SKU 数量 ${mainBand.count} 个。`;
+
+      const rowsMainBand = rowsCat
+        .filter((r) => getDetailPriceBandLabel(r.price) === mainBand.label)
+        .sort((a, b) => b.gmv - a.gmv)
+        .slice(0, 10);
+
+      rowsMainBand.forEach((r) => {
+        const tr = document.createElement("tr");
+        const cells = [
+          r.product_name || "",
+          r.shop_name || "",
+          isNaN(r.price) ? "" : r.price.toFixed(2),
+          isNaN(r.gmv) ? "" : r.gmv.toFixed(0),
+        ];
+        cells.forEach((val) => {
+          const td = document.createElement("td");
+          td.textContent = val;
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+    }
+
+    function initCategoryPriceControls(rows) {
+      const select = document.getElementById("category-price-select");
+      const summaryEl = document.getElementById("category-price-summary");
+      if (!select || !summaryEl) return;
+      select.innerHTML = "";
+
+      const map = {};
+      rows.forEach((r) => {
+        if (!r.cat_level2 || isNaN(r.gmv)) return;
+        map[r.cat_level2] = (map[r.cat_level2] || 0) + r.gmv;
+      });
+      const arr = Object.entries(map)
+        .map(([cat, gmv]) => ({ cat, gmv }))
+        .sort((a, b) => b.gmv - a.gmv);
+
+      const topCats = arr.slice(0, 30);
+      if (!topCats.length) {
+        summaryEl.textContent = "没有可用的二级类目数据。";
+        return;
+      }
+
+      topCats.forEach((item, idx) => {
+        const opt = document.createElement("option");
+        opt.value = item.cat;
+        opt.textContent =
+          item.cat + (idx < 10 ? `（GMV Top ${idx + 1}）` : "");
+        select.appendChild(opt);
+      });
+
+      const updateView = () => {
+        const cat = select.value;
+        if (!cat) return;
+        renderCategoryPriceView(rows, cat);
+      };
+
+      select.addEventListener("change", updateView);
+      updateView();
+    }
+
+    function loadData() {
+      const status = document.getElementById("status");
+      const errorDiv = document.getElementById("error");
+      status.textContent = "正在从 xl.csv 加载数据…";
+      errorDiv.textContent = "";
+
+      Papa.parse("xl.csv", {
+        download: true,
+        header: true,
+        skipEmptyLines: true,
+        complete: function (results) {
+          if (results.errors && results.errors.length) {
+            console.warn("CSV parse errors:", results.errors.slice(0, 3));
+          }
+          const rows = normalizeRows(results.data);
+          status.textContent = `已加载 ${rows.length} 行数据，正在生成图表…`;
+
+          renderCategoryChart(rows);
+          renderPriceBandChart(rows);
+          renderMonthChart(rows);
+          renderTopTable(rows);
+          renderBrandChart(rows);
+          renderCatPriceHeatmap(rows);
+          renderPriceGmvScatter(rows);
+          renderIngredientBar(rows);
+          renderBenefitTrend(rows);
+          initCategoryPriceControls(rows);
+
+          status.textContent = `已加载 ${rows.length} 行数据，图表生成完成。`;
+        },
+        error: function (err) {
+          console.error("Failed to load csv:", err);
+          status.textContent = "加载数据失败。";
+          errorDiv.textContent =
+            "无法读取 xl.csv。若是直接用文件方式打开本页面，浏览器可能禁止前端读取本地文件。建议用 VS Code Live Server 或任意本地 HTTP 服务打开当前目录。";
+        },
+      });
+    }
+
+    window.addEventListener("load", loadData);
+  </script>
+</body>
+</html>
+
